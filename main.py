@@ -9,8 +9,6 @@ from utils import *
 from bubble_clustering.micu import *
 from bubble_clustering.ltcf import *
 
-from simulation import *
-
 
 parser = argparse.ArgumentParser(description="CoRN")
 parser.add_argument('--data',type=str, default='MICU', help='Switch to different datasets: MICU, LTCF_small, LTCF_large')
