@@ -8,7 +8,7 @@ Hasan et al. ["Modeling and Evaluation of Clustering Patient Care into Bubbles"]
 
 
 ### Run the demo
-```python main.py --data MICU --n_replicate 100 --n_cpu 20 --n_bubble 3 --trans_prob 0.001 --D 5 --Y 10```
+```python main.py --data MICU --n_replicate 500 --n_bubble 3```
 
 ### Data
 In order to use your own data, you have to provide the followings:

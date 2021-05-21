@@ -84,7 +84,7 @@ class BaseClustering(ABC):
                                 intrvl_list.append(v[2])
 
                         prob_uv = compute_probability(intrvl_list, trans_prob, "r1", "r2")
-                        prob_vu = compute_probability(intrvl_list, trans_prob, "r1", "r2")
+                        prob_vu = compute_probability(intrvl_list, trans_prob, "r2", "r1")
 
                         prob_dic[(r1, r2, h)] = prob_uv
                         prob_dic[(r2, r1, h)] = prob_vu
@@ -92,9 +92,17 @@ class BaseClustering(ABC):
     
         prob_dic = calculate_weight_for_individual_hcp(self.args, base_visit_graph)
         
+        # For MICU all rooms are patient rooms; 
+        # Therefore, send the r_list for clustering
+        rooms = self.r_list 
+        # For LTCF there are also dining rooms and others 
+        # Remove non-patient rooms before clustering
+        if self.args.data == 'LTCF_small' or self.args.data == 'LTCF_large':
+            rooms = [r for r in self.r_list if self.r_type[r]=='in-room']
+
         # Calculate weight between pair of rooms for all hcps
-        for r1 in self.r_list:
-            for r2 in self.r_list:
+        for r1 in rooms:
+            for r2 in rooms:
                 if r1==r2:
                     continue
                 if (r1, r2) not in r_weight_map:
@@ -127,6 +135,9 @@ class BaseClustering(ABC):
             e_weight[(r1, r2)] =  r_weight_map[key]
             e_weight[(r2, r1)] = r_weight_map[key]
         
+        for key in e_weight:
+            e_weight[key] = int(e_weight[key]*1000)
+    
         return e_weight
 
 

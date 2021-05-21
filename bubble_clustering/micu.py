@@ -41,45 +41,43 @@ class MICUBubbleClustering(BaseClustering):
         for h in self.h_list:
             last_visit[h] = {'start':normalized_init_time, 'end':normalized_init_time, 'room': None}
 
-        # Repeat 1 day HCP-Room interactions over 30 days patients stays
-        for day in range(1,31):
-            for i in range(len(self.h_visits)):
-                cur_hcp, cur_room, h_start, h_end = self.h_visits[i]
+        for i in range(len(self.h_visits)):
+            cur_hcp, cur_room, h_start, h_end = self.h_visits[i]
 
-                normalised_h_start = (h_start - timedelta(minutes=(self.interaction_date.day - 1) * 1440) + timedelta(minutes= day*1440))
-                normalised_h_end = (h_end - timedelta(minutes=(self.interaction_date.day - 1) * 1440) + timedelta(minutes= day*1440))
-    
-                patient_id = None
-                for j in range(len(self.p_stay)):
-                    patient, room, p_start, p_end = self.p_stay[j]
-                    if room == cur_room and p_start <= normalised_h_start <= p_end and p_start <= normalised_h_end <= p_end:
-                        patient_id = patient
-                        break
-                
-                # Update visit graph (only for non-substituble HCPs i.e. HCP who do not belong to any bubble)
-                if 'nurse' not in self.h_type[cur_hcp]:
-                    key = (cur_hcp, cur_room) 
-                    if key not in self.base_visit_graph:
-                        self.base_visit_graph[key] = []
-                    self.base_visit_graph[key].append([normalised_h_start, normalised_h_end])
+            # normalised_h_start = (h_start - timedelta(minutes=(self.interaction_date.day - 1) * 1440) + timedelta(minutes= day*1440))
+            # normalised_h_end = (h_end - timedelta(minutes=(self.interaction_date.day - 1) * 1440) + timedelta(minutes= day*1440))
 
-                # Update load, demand and mobility only for nurses
-                if patient_id!=None and 'nurse' in self.h_type[cur_hcp]:
-                    # update load and met demand here
-                    val = (h_end - h_start).total_seconds()/60.0
-                    self.base_hcp_load[cur_hcp]+= val
-                    if 'am' in self.h_type[cur_hcp]:
-                        self.base_r_demand_am[cur_room]+=val
-                    elif 'pm' in self.h_type[cur_hcp]:
-                        self.base_r_demand_pm[cur_room]+=val
-                    elif h_start.hour<12:
-                        self.base_r_demand_am[cur_room]+=val
-                    elif h_start.hour>=12:
-                        self.base_r_demand_pm[cur_room]+=val
-                    self.base_h_mobility[cur_hcp] += self.r_dist[(last_visit[cur_hcp]['room'], cur_room)] if last_visit[cur_hcp]['room'] is not None else 0
-                    
-                    # Keep track of the last visit
-                    last_visit[cur_hcp] = {'start':normalised_h_start, 'end':normalised_h_end, 'room':cur_room}
+            # patient_id = None
+            # for j in range(len(self.p_stay)):
+            #     patient, room, p_start, p_end = self.p_stay[j]
+            #     if room == cur_room and p_start <= normalised_h_start <= p_end and p_start <= normalised_h_end <= p_end:
+            #         patient_id = patient
+            #         break
+            
+            # Update visit graph (only for non-substituble HCPs i.e. HCP who do not belong to any bubble)
+            if 'nurse' not in self.h_type[cur_hcp]:
+                key = (cur_hcp, cur_room) 
+                if key not in self.base_visit_graph:
+                    self.base_visit_graph[key] = []
+                self.base_visit_graph[key].append([h_start, h_end])
+
+            # Update load, demand and mobility only for nurses
+            #if patient_id!=None and 'nurse' in self.h_type[cur_hcp]:
+                # update load and met demand here
+            val = (h_end - h_start).total_seconds()/60.0
+            self.base_hcp_load[cur_hcp]+= val
+            if 'am' in self.h_type[cur_hcp]:
+                self.base_r_demand_am[cur_room]+=val
+            elif 'pm' in self.h_type[cur_hcp]:
+                self.base_r_demand_pm[cur_room]+=val
+            elif h_start.hour<12:
+                self.base_r_demand_am[cur_room]+=val
+            elif h_start.hour>=12:
+                self.base_r_demand_pm[cur_room]+=val
+            self.base_h_mobility[cur_hcp] += self.r_dist[(last_visit[cur_hcp]['room'], cur_room)] if last_visit[cur_hcp]['room'] is not None else 0
+            
+            # Keep track of the last visit
+            last_visit[cur_hcp] = {'start':h_start, 'end':h_end, 'room':cur_room}
         return 0 
 
 

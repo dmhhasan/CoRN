@@ -141,12 +141,11 @@ class MICUCovid19Simulation(BaseSimulation):
                         if mapped_hcp not in self.infection_list:
                             h_bubble = None if self.args.simulation=='base' else data.clustering['h_bubble']
                             env_prob = self.get_env_contamination(mapped_hcp, normalized_idx_start, last_visit, h_bubble)
-                            if random.random() < env_prob:
+                            if 'nurse' in self.h_type[mapped_hcp] and random.random() < env_prob:
                                 # HCP get infected from environmental exposure
-
                                 infectionData = InfectionData(inf_day=0,is_first_infected = False, infected_by="env", trans_prob=data.trans_prob, infected_at="env", status=self.STATUS_INFECTED)
                                 self.infection_list[mapped_hcp] = infectionData
-                                
+
                             elif patient_id in self.infection_list and self.infection_list[patient_id].status == self.STATUS_SHEDDING:#and random.random() < long_exposure_trans_prob:
                                 shedding = self.shedding_dic[self.model_type][self.infection_list[patient_id].inf_day]/self.shedding_scale
                                 shedding*=data.trans_prob
@@ -156,9 +155,10 @@ class MICUCovid19Simulation(BaseSimulation):
                                     infectionData = InfectionData(inf_day=0,is_first_infected = False, infected_by="patient", trans_prob=data.trans_prob, infected_at=cur_room, status=self.STATUS_INFECTED)
                                     self.infection_list[mapped_hcp] = infectionData
                                     self.infection_list[patient_id].secondary_infs.append(mapped_hcp)
-                                    if self.args.simulation != 'base':
-                                        self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp)
-                        
+                                    # if self.args.simulation != 'base':
+                                    #     self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp)    
+                                    
+
                          
                     # find the probability of patient being infected
                     # by overlapped HCPs in the room 
@@ -185,10 +185,10 @@ class MICUCovid19Simulation(BaseSimulation):
                             # Patient get infected by HCP
                             infectionData = InfectionData(inf_day=0,is_first_infected = False, infected_by="hcp", trans_prob=data.trans_prob, infected_at = cur_room, status=self.STATUS_INFECTED)
                             self.infection_list[patient_id] = infectionData
-                            if self.args.simulation != 'base':
-                                if cur_room not in data.clustering['assignment'][src_bubble]['room']:
-                                    self.ext_leave_cnt+=1
-                                    self.ext_reach_cnt+=1
+                            #if self.args.simulation != 'base':
+                            #    if cur_room not in data.clustering['assignment'][src_bubble]['room']:
+                            #        self.ext_leave_cnt+=1
+                            #        self.ext_reach_cnt+=1
                             for h,ts in infected_by:
                                 self.infection_list[h].secondary_infs.append(patient_id)
 
@@ -215,8 +215,20 @@ class MICUCovid19Simulation(BaseSimulation):
         if data.rep_id == 1:
             if self.args.simulation != 'base':
                 self.store_rewired_network(adj, node_list)
+        R0 = len(self.infection_list[data.inf_src].secondary_infs)
 
-        return self.infection_list, self.h_load, self.r_demand, self.r_unmet_demand, self.h_mobility, self.ext_leave_cnt, self.ext_reach_cnt
+        if self.args.simulation != 'base':
+            for key in self.infection_list:
+                # Any non-nurse hcp infection means the pathogen leaves the bubble
+                if key in self.h_list and 'nurse' not in self.h_type[key]:
+                    self.ext_leave = True
+                    # where an infected trasnmission happened
+                    location = self.infection_list[key].infected_at 
+                    if location in self.r_list and location not in data.clustering['assignment'][src_bubble]['room']:
+                        self.ext_reach = True
+
+
+        return self.infection_list, self.h_load, self.r_demand, self.r_unmet_demand, self.h_mobility, self.ext_leave, self.ext_reach, R0
 
 
     def get_env_contamination(self, cur_hcp, cur_time, last_visit, hcp_bubble):
@@ -238,7 +250,9 @@ class MICUCovid19Simulation(BaseSimulation):
             # chance of transmission is zero
             if h==cur_hcp or h not in self.infection_list:
                 continue
-            start = last_visit[h]['start']
+            if h in self.infection_list and self.infection_list[h].status!=self.STATUS_SHEDDING:
+                continue
+            start = last_visit[h]['end']
             end = last_visit[h]['end']
 
             if (outside_end-outside_start).total_seconds()>60*60:
@@ -260,17 +274,6 @@ class MICUCovid19Simulation(BaseSimulation):
         env_contamination = 1-not_mixing_trans_prob
         return env_contamination
     
-
-    def update_ext_transmission_cnt(self, cur_room, data, src_bubble, mapped_hcp):
-        if self.args.simulation != 'base':
-            if cur_room not in data.clustering['assignment'][src_bubble]['room']:
-                self.ext_leave_cnt+=1
-                self.ext_reach_cnt+=1
-            else:
-                if 'nurse' not in self.h_type[mapped_hcp]: # non-nurse
-                    self.ext_leave_cnt+=1
-
-
 
     def do_rewiring(self, idx, day, cur_room, data, rewired_hcp_mapping):
         idx_hcp, idx_room, idx_start, idx_end = self.h_visits[idx]
@@ -346,8 +349,8 @@ class MICUCovid19Simulation(BaseSimulation):
                     self.infection_list[h].secondary_infs.append(mapped_hcp1)
                     
                 hcp_hcp_infection_list[mapped_hcp1] = infectionData
-                if self.args.simulation != 'base':
-                    self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp1)
+                # if self.args.simulation != 'base':
+                #     self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp1)
 
         return hcp_hcp_infection_list
     

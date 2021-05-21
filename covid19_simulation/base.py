@@ -34,9 +34,6 @@ class BaseSimulation(ABC):
         self.STATUS_QUARANTINE = 'qurantine'
         self.STATUS_RECOVERED = 'recovered'
 
-        # External transmission 
-        self.replicte_cnt_with_ext_leave = 0
-        self.replicte_cnt_with_ext_reach = 0
 
     def initialize_replicate(self):
         # Record different cost values
@@ -61,10 +58,8 @@ class BaseSimulation(ABC):
         else:
             for h in self.h_list:
                 self.h_availability[h] = 0
-        
-        # How many external transmission of two kinds occur
-        self.ext_leave_cnt =0
-        self.ext_reach_cnt = 0
+        self.ext_leave = False 
+        self.ext_reach = False
 
 
 
@@ -135,18 +130,16 @@ class BaseSimulation(ABC):
         for r in self.r_list:
             r_demand_sum[r] = 0
             r_unmet_demand_sum[r] = 0
+        
+        # External transmission 
+        replicte_cnt_with_ext_leave = 0
+        replicte_cnt_with_ext_reach = 0
 
         # Run for each replicate and add each quantity
         for i in range(self.args.n_replicate):
-            inf_list, h_load, r_demand, r_unmet_demand, h_mobility, ext_leave_cnt, ext_reach_cnt = results[i]
+            inf_list, h_load, r_demand, r_unmet_demand, h_mobility, ext_leave, ext_reach, R0 = results[i]
 
-            # R0 of current replicate based on all HCPs
-            list = []
-            for key in inf_list:
-                inf = inf_list[key]
-                list.append(len(inf.secondary_infs))
-            r0 = np.mean(list)
-            r0_list.append(r0)
+            r0_list.append(R0)
             inf_cnt_list.append(len(inf_list))
             # update hcp load
             for h in h_load:
@@ -160,11 +153,12 @@ class BaseSimulation(ABC):
             # update unmet room demand
             for r in r_unmet_demand:
                 r_unmet_demand_sum[r]+=r_unmet_demand[r]
+            
             # update ext leave/reach replicate
-            if ext_leave_cnt > 0:
-                self.replicte_cnt_with_ext_leave+=1
-            if ext_reach_cnt > 0:
-                self.replicte_cnt_with_ext_reach+=1
+            if ext_leave:
+                replicte_cnt_with_ext_leave+=1
+            if ext_reach:
+                replicte_cnt_with_ext_reach+=1
         
         # calculate average of the sum for each quantity
         r0_avg = np.mean(r0_list)
@@ -172,11 +166,11 @@ class BaseSimulation(ABC):
         h_mobility_list =[h_mobility_sum[h]/self.args.n_replicate for h in h_mobility_sum]
         r_demand_list = [r_demand_sum[r]/self.args.n_replicate for r in r_demand_sum]
         r_unmet_demand_list =[r_unmet_demand_sum[r]/self.args.n_replicate for r in r_unmet_demand_sum]
-        ext_leave_cnt_fraction = self.replicte_cnt_with_ext_leave / self.args.n_replicate
-        ext_reach_cnt_fraction = self.replicte_cnt_with_ext_reach / self.args.n_replicate
+        ext_leave_cnt_fraction = replicte_cnt_with_ext_leave / self.args.n_replicate
+        ext_reach_cnt_fraction = replicte_cnt_with_ext_reach / self.args.n_replicate
 
         # Convert to per day in hour
-        summary = {"Infection count": np.mean(inf_cnt_list), "R0": r0_avg, "Avg. HCP load": np.mean(h_load_list)/(30*60), "Avg. HCP mobility": np.mean(h_mobility_list)/30, "Avg. room demand": np.mean(r_demand_list)/(30*60),
+        summary = {"Infection count": np.mean(inf_cnt_list), "R0": r0_avg, "Avg. HCP load": np.mean(h_load_list)/(30*60), "Avg. HCP footsteps": np.mean(h_mobility_list)/30, "Avg. room demand": np.mean(r_demand_list)/(30*60),
                      "Avg. unmet demand": np.mean(r_unmet_demand_list)/(30*60), "Fraction of external leave":ext_leave_cnt_fraction, "Fraction of external reach:":ext_reach_cnt_fraction}
         
         return summary

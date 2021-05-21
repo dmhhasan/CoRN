@@ -2,21 +2,25 @@ from .base import *
 
 
 class LTCFCovid19Simulation(BaseSimulation):
-    def __init__(self, args, h_visits, h_list, r_list, h_type, r_dists):
+    def __init__(self, args, h_visits, h_list, r_list, h_type, r_type, r_dists):
         super().__init__()
         self.args = args 
         self.h_list = h_list
         self.r_list = list(r_list) 
         self.h_type = h_type
+        self.r_type = r_type
         self.nrs_list = [h for h in self.h_list if self.h_type[h]=='nurse']
         self.non_nrs_list = [h for h in self.h_list if self.h_type[h]=='non-nurse']
         self.h_visits = h_visits
         self.r_dists = r_dists
+        if self.args.data == "LTCF_small":
+            self.random_mixing_prob= 0.018057 # This value is calculated based on outdoor contacts
+        elif self.args.data == "LTCF_large":
+            self.random_mixing_prob= 0.052412
     
     def run_covid19_simulation(self):
-        random.seed(12)
+        random.seed(42)
         inf_srcs = random.choices(self.nrs_list, k=self.args.n_replicate)
-
         self.param = []
         for i in range(self.args.n_replicate):
             if self.args.simulation == 'base':
@@ -66,7 +70,7 @@ class LTCFCovid19Simulation(BaseSimulation):
 
         # Keep last visits record
         last_visit = {}
-        initial_time = self.h_visits[0][2]
+        initial_time = 0
         for h in self.h_list:
             last_visit[h] = {'start':initial_time, 'end':initial_time, 'room': None}
 
@@ -77,6 +81,9 @@ class LTCFCovid19Simulation(BaseSimulation):
             # Update infection status 
             self.update_infection_status()
 
+            for h in self.h_list:
+                self.h_availability[h] = 0
+
             # Keep track of HCP_Patient interaction index that are processed together 
             # for overlapping visits in the same room at the same time
             overlapped_processed_contact = []
@@ -85,6 +92,28 @@ class LTCFCovid19Simulation(BaseSimulation):
                 if i in overlapped_processed_contact:
                     continue
                 cur_hcp, cur_room, h_start, h_end = self.h_visits[i]
+                dining_interaction_dic = {}
+                # If a nurse visits dining room, just find random nurse from the same bubble and replace
+                # add the nurse for the dummy dining room of the source bubble
+                # then continue
+                if self.r_type[cur_room]=='dining' and self.h_type[cur_hcp]=='nurse':
+                    if self.args.simulation == 'rewired_random' or self.args.simulation=='rewired_ilp':
+                        random_h = cur_hcp # send cur_hcp to dining 
+                        if random_h is not None:
+                            self.h_availability[random_h] = h_end
+                        bubble = data.clustering['h_bubble'][random_h]
+                        if bubble not in dining_interaction_dic:
+                            dining_interaction_dic[bubble] = []
+                        dining_interaction_dic[bubble].append([random_h, cur_room, h_start, h_end])
+                    else:
+                        self.h_availability[cur_hcp] = h_end
+                        if cur_room not in dining_interaction_dic:
+                            dining_interaction_dic[cur_room] = []
+                        dining_interaction_dic[cur_room].append([cur_hcp, cur_room, h_start, h_end])
+                    continue
+                elif self.r_type[cur_room] != 'in-room':
+                    continue
+
                 patient_id = cur_room
                 overlapped_contact_idx = self.find_overlapped_contact(cur_room, h_start, h_end)
                 
@@ -94,7 +123,7 @@ class LTCFCovid19Simulation(BaseSimulation):
                 
                 for idx in overlapped_contact_idx:
                     overlapped_processed_contact.append(idx)
-                    rewired_hcp_mapping = self.do_rewiring(idx, day, cur_room, data, rewired_hcp_mapping)
+                    rewired_hcp_mapping = self.do_rewiring(idx, cur_room, data, rewired_hcp_mapping)
                     idx_hcp, idx_room, idx_start, idx_end = self.h_visits[idx]
                     # mapped_hcp could be either same or different from index_hcp
                     # depending on if perturb simulation and nurse type
@@ -121,12 +150,12 @@ class LTCFCovid19Simulation(BaseSimulation):
                     if mapped_hcp not in self.infection_list:
                         h_bubble = None if self.args.simulation=='base' else data.clustering['h_bubble']
                         env_prob = self.get_env_contamination(mapped_hcp, idx_start, last_visit, h_bubble)
-                        if random.random() < env_prob:
-                            # HCP get infected from environmental exposure
 
+                        if self.h_type[mapped_hcp]=='nurse' and random.random() < env_prob:
+                            # HCP get infected from environmental exposure
                             infectionData = InfectionData(inf_day=0,is_first_infected = False, infected_by="env", trans_prob=data.trans_prob, infected_at="env", status=self.STATUS_INFECTED)
                             self.infection_list[mapped_hcp] = infectionData
-                            
+                                
                         elif patient_id in self.infection_list and self.infection_list[patient_id].status == self.STATUS_SHEDDING:#and random.random() < long_exposure_trans_prob:
                             shedding = self.shedding_dic[self.model_type][self.infection_list[patient_id].inf_day]/self.shedding_scale
                             shedding*=data.trans_prob
@@ -136,8 +165,8 @@ class LTCFCovid19Simulation(BaseSimulation):
                                 infectionData = InfectionData(inf_day=0,is_first_infected = False, infected_by="patient", trans_prob=data.trans_prob, infected_at=cur_room, status=self.STATUS_INFECTED)
                                 self.infection_list[mapped_hcp] = infectionData
                                 self.infection_list[patient_id].secondary_infs.append(mapped_hcp)
-                                if self.args.simulation != 'base':
-                                    self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp)
+                                # if self.args.simulation != 'base':
+                                #     self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp)
                     
                         
                 # find the probability of patient being infected
@@ -147,7 +176,6 @@ class LTCFCovid19Simulation(BaseSimulation):
                     infected_by = [] # which HCPs infect the patient and for how long it contacts
                     for idx in overlapped_contact_idx:
                         idx_hcp, idx_room, idx_start, idx_end = self.h_visits[idx]
-
                         mapped_hcp = rewired_hcp_mapping[idx]
                         if mapped_hcp == None:
                             continue
@@ -163,18 +191,23 @@ class LTCFCovid19Simulation(BaseSimulation):
                         # Patient get infected by HCP
                         infectionData = InfectionData(inf_day=0,is_first_infected = False, infected_by="hcp", trans_prob=data.trans_prob, infected_at = cur_room, status=self.STATUS_INFECTED)
                         self.infection_list[patient_id] = infectionData
-                        if self.args.simulation != 'base':
-                            if cur_room not in data.clustering['assignment'][src_bubble]['room']:
-                                self.ext_leave_cnt+=1
-                                self.ext_reach_cnt+=1
                         for h,ts in infected_by:
                             self.infection_list[h].secondary_infs.append(patient_id)
+                        # if self.args.simulation != 'base':
+                        #     if cur_room not in data.clustering['assignment'][src_bubble]['room']:
+                        #         self.ext_leave_cnt+=1
+                        #         self.ext_reach_cnt+=1
 
                 # Calculate HCP-HCP transmission inside of the patient room
                 hcp_hcp_inf_list = self.calculate_hcp_hcp_transmission(overlapped_contact_idx, rewired_hcp_mapping, data, cur_room, src_bubble)
                 
                 for key in hcp_hcp_inf_list:
                     self.infection_list[key] = hcp_hcp_inf_list[key]
+                # Calculate HCP-HCP transmission inside of the shared place e.g., dining room
+                hcp_hcp_dining_inf_list = self.calculate_dining_place_transmission(data, dining_interaction_dic)
+                
+                for key in hcp_hcp_dining_inf_list:
+                    self.infection_list[key] = hcp_hcp_dining_inf_list[key]
                 # update the last visits of overlapped HCPs
                 for idx in overlapped_contact_idx:
                     mapped_hcp = rewired_hcp_mapping[idx]
@@ -191,17 +224,22 @@ class LTCFCovid19Simulation(BaseSimulation):
         if data.rep_id == 1:
             if self.args.simulation != 'base':
                 self.store_rewired_network(adj, node_list)
+        R0 = len(self.infection_list[data.inf_src].secondary_infs)
 
-        return self.infection_list, self.h_load, self.r_demand, self.r_unmet_demand, self.h_mobility, self.ext_leave_cnt, self.ext_reach_cnt
+        if self.args.simulation != 'base':
+            for key in self.infection_list:
+                # Any non-nurse hcp infection means the pathogen leaves the bubble
+                if key in self.h_list and 'nurse' not in self.h_type[key]:
+                    self.ext_leave = True
+                    # where an infected trasnmission happened
+                    location = self.infection_list[key].infected_at 
+                    if location in self.r_list and location not in data.clustering['assignment'][src_bubble]['room']:
+                        self.ext_reach = True
+
+        return self.infection_list, self.h_load, self.r_demand, self.r_unmet_demand, self.h_mobility, self.ext_leave, self.ext_reach, R0
 
 
     def get_env_contamination(self, cur_hcp, cur_time, last_visit, hcp_bubble):
-        cur_shift_hcp_list = []
-        if 'am' in self.h_type[cur_hcp]:
-            cur_shift_hcp_list = [h for h in self.h_type if self.h_type[h]=='am_nurse']
-        elif 'pm' in self.h_type[cur_hcp]:
-            cur_shift_hcp_list = [h for h in self.h_type if self.h_type[h]=='pm_nurse']
-
         outside_start = last_visit[cur_hcp]['end'] # last_visit should not be the current visit of cur_hcp 
         outside_end = cur_time
 
@@ -209,46 +247,39 @@ class LTCFCovid19Simulation(BaseSimulation):
         # other cur shift HCP's during the outside room time period
         
         not_mixing_trans_prob = 1
-        for h in cur_shift_hcp_list:
+        for h in self.h_list:
             # if the outside hcp not contagious 
             # chance of transmission is zero
             if h==cur_hcp or h not in self.infection_list:
                 continue
-            start = last_visit[h]['start']
+            if h in self.infection_list and self.infection_list[h].status!=self.STATUS_SHEDDING:
+                continue
+            start = last_visit[h]['end']
             end = last_visit[h]['end']
 
-            if (outside_end-outside_start)>60*60:
+            if outside_end-outside_start>60*60:
                 outside_start = outside_end
 
             #overlapping = max(0, (start-outside_start).total_seconds()) + max(0, min((outside_end-end).total_seconds(), (outside_end-outside_start).total_seconds()))
             overlapping = self.find_overlapping_period(startA=start, endA=end, startB=outside_start, endB=outside_end)
             if overlapping!=0:
-                prob = overlapping/((outside_end-outside_start))
+                prob = overlapping/(outside_end-outside_start)
             else:
                 prob = 0
             if hcp_bubble is not None and h in hcp_bubble and cur_hcp in hcp_bubble and hcp_bubble[h] == hcp_bubble[cur_hcp]:
-                mixing_trans_prob = 0.0005*prob
+                #mixing_trans_prob = LTCF_INTRA_BUBBLE_MIXING_TRANS_PROB*prob
+                mixing_trans_prob = self.random_mixing_prob*prob
             else:
-                mixing_trans_prob = 0.0005 * 0.75 *prob # rho = 0.75, intra bubble mixing trans prob = 0.0005
+                mixing_trans_prob = self.random_mixing_prob* 0.75*prob
             long_mixing_trans_prob = mixing_trans_prob#1 - math.pow((1 - mixing_trans_prob), math.ceil(overlapping / 30)) # 30 seconds
 
             not_mixing_trans_prob *=(1-long_mixing_trans_prob)
         env_contamination = 1-not_mixing_trans_prob
         return env_contamination
-    
-
-    def update_ext_transmission_cnt(self, cur_room, data, src_bubble, mapped_hcp):
-        if self.args.simulation != 'base':
-            if cur_room not in data.clustering['assignment'][src_bubble]['room']:
-                self.ext_leave_cnt+=1
-                self.ext_reach_cnt+=1
-            else:
-                if self.h_type[mapped_hcp] != 'nurse': # non-nurse
-                    self.ext_leave_cnt+=1
 
 
 
-    def do_rewiring(self, idx, day, cur_room, data, rewired_hcp_mapping):
+    def do_rewiring(self, idx, cur_room, data, rewired_hcp_mapping):
         idx_hcp, idx_room, idx_start, idx_end = self.h_visits[idx]
  
         if self.args.simulation == 'rewired_random' or self.args.simulation=='rewired_ilp':
@@ -320,11 +351,34 @@ class LTCFCovid19Simulation(BaseSimulation):
                     self.infection_list[h].secondary_infs.append(mapped_hcp1)
                     
                 hcp_hcp_infection_list[mapped_hcp1] = infectionData
-                if self.args.simulation != 'base':
-                    self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp1)
+                # if self.args.simulation != 'base':
+                #     self.update_ext_transmission_cnt(cur_room, data, src_bubble, mapped_hcp1)
 
         return hcp_hcp_infection_list
+
     
+
+    def calculate_dining_place_transmission(self, data, dining_interaction_dic):
+        tmp_infection_list = {}
+        for bubble in dining_interaction_dic:
+            dining_hcps = dining_interaction_dic[bubble]
+            prob = 1
+            infected_by = []
+            for hcp, room, start, end in dining_hcps:
+                if hcp in self.infection_list and self.infection_list[hcp].status == self.STATUS_SHEDDING:
+                    shedding = self.shedding_dic[self.model_type][self.infection_list[hcp].inf_day]/self.shedding_scale
+                    shedding*=data.trans_prob
+                    scaled_shedding = self.get_long_exposure_prob(start, end, shedding)
+                    prob*=(1-scaled_shedding)
+                    infected_by.append([hcp, [start, end] ])
+            prob = 1 - prob
+            for hcp, room, start, end in dining_hcps:
+                if hcp not in self.infection_list and random.random()<prob:
+                    infectionData = InfectionData(inf_day=0,is_first_infected = False, infected_by="hcp", trans_prob=data.trans_prob, infected_at=room, status=self.STATUS_INFECTED)
+                    for h, contact_timestamp in infected_by:
+                        self.infection_list[h].secondary_infs.append(hcp)
+                    tmp_infection_list[hcp] = infectionData
+        return tmp_infection_list
 
 
 

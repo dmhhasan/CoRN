@@ -41,25 +41,25 @@ class LTCFBubbleClustering(BaseClustering):
             last_visit[h] = {'start':0, 'end':0, 'room': None}
 
         # Repeat 1 day HCP-Room interactions over 30 days patients stays
-        for day in range(1,31):
-            for i in range(len(self.h_visits)):
-                cur_hcp, cur_room, h_start, h_end = self.h_visits[i]
-                # Update visit graph (only for non-substituble HCPs i.e. HCP who do not belong to any bubble)
-                if self.h_type[cur_hcp] == 'non-nurse':
-                    key = (cur_hcp, cur_room)
-                    if key not in self.base_visit_graph:
-                        self.base_visit_graph[key] = []
-                    self.base_visit_graph[key].append([h_start, h_end])
-                # Update load, demand and mobility
-                if self.h_type[cur_hcp]=='nurse':
-                    # update load and met demand here
-                    val = (h_end - h_start)/60.0
-                    self.base_hcp_load[cur_hcp]+= val
-                    self.base_r_demand[cur_room]+=val
-                    self.base_h_mobility[cur_hcp] += self.r_dist[(last_visit[cur_hcp]['room'], cur_room)] if last_visit[cur_hcp]['room'] is not None else 0
-                    
-                    # Keep track of the last visit
-                    last_visit[cur_hcp] = {'start':h_start, 'end':h_end, 'room':cur_room}
+        #for day in range(1,31):
+        for i in range(len(self.h_visits)):
+            cur_hcp, cur_room, h_start, h_end = self.h_visits[i]
+            # Update visit graph (only for non-substituble HCPs i.e. HCP who do not belong to any bubble)
+            if self.h_type[cur_hcp] == 'non-nurse':
+                key = (cur_hcp, cur_room)
+                if key not in self.base_visit_graph:
+                    self.base_visit_graph[key] = []
+                self.base_visit_graph[key].append([h_start, h_end])
+            # Update load, demand and mobility
+            if self.h_type[cur_hcp]=='nurse':
+                # update load and met demand here
+                val = (h_end - h_start)/60.0
+                self.base_hcp_load[cur_hcp]+= val
+                self.base_r_demand[cur_room]+=val
+                self.base_h_mobility[cur_hcp] += self.r_dist[(last_visit[cur_hcp]['room'], cur_room)] if last_visit[cur_hcp]['room'] is not None else 0
+                
+                # Keep track of the last visit
+                last_visit[cur_hcp] = {'start':h_start, 'end':h_end, 'room':cur_room}
         return 0 
 
 
@@ -150,6 +150,7 @@ class LTCFBubbleClustering(BaseClustering):
                     for n in nurses:
                         self.h_per_room[r]["nurse"].append(n)
             self.store_bubble_clustering()
+
         return self.h_bubble, self.h_per_room, self.clustering
 
 
